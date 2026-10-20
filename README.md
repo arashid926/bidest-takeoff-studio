@@ -68,5 +68,11 @@ change, then commit and push.
 Loaded from CDN and cached for offline use: [pdf.js](https://mozilla.github.io/pdf.js/) 3.11.174
 (Apache-2.0) and Google Fonts (Archivo, JetBrains Mono, Source Serif 4 — OFL).
 
+## Disclaimer
+
+This software is provided "as is", without warranty of any kind. Quantities, rates and estimates produced
+with it must be checked by a qualified quantity surveyor before use in any tender, contract or valuation.
+The author accepts no liability for any loss arising from its use.
+
 ---
-© Abdul Rashid. All rights reserved unless a licence file is added.
+© Abdul Rashid. All rights reserved.

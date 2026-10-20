@@ -36,6 +36,35 @@ python -m http.server 8080
 4. The included workflow deploys on every push to `main`. The site appears at
    `https://<your-user>.github.io/bidest-takeoff-studio/`.
 
+## Uploading schedules
+
+Every schedule card (footings, necks, ground beams, ground slab, columns, beams, slabs, external and internal
+walls, rooms, doors, windows and structural steel) has **Upload from Excel** and **Template** buttons. Doors and
+windows have their own **Upload doors** / **Upload windows** buttons.
+
+- Upload your schedule in its existing layout. Columns are matched by heading (Mark, No., Length, Width,
+  Depth …), title rows above the headings are skipped, and you confirm the mapping before anything is written.
+- Choose **millimetres** in the import window if the schedule is in mm (it is usually detected).
+- **Replace** swaps only that schedule (e.g. uploading windows keeps your doors); **Add to existing** appends.
+- On the **Schedules** page, **Upload a schedule** detects the schedule type for you, and blank templates for
+  every schedule can be downloaded.
+
+Quantities (concrete, excavation, formwork, reinforcement, finishes, deductions …) recalculate as soon as the
+rows are imported.
+
+## Rates
+
+The app ships **without rates** — you load your own.
+
+1. Open **Price library** and click **Download blank template**. It lists every CSI code the app measures.
+2. Fill in a **Total rate** for each line, or the Labour / Material / Plant / Subcontract components.
+3. Click **Upload rate list (Excel)**, check the column mapping, and press **Import**.
+
+Any `.xlsx` or `.csv` rate list works — columns are matched by header name (CSI code, Description, Unit,
+Rate …) and you can remap them before importing. Rates match bill items on exact CSI code first, then on the
+longest code prefix. Use **Send this project's rates to the shared library** to reuse them on every new
+project.
+
 ## Where your work is saved
 
 Projects, templates, the shared price library and attached drawings are saved **in your browser on this

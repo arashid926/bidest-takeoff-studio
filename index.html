@@ -1532,6 +1532,7 @@ function head(eyebrow,title,sub,actions){
     actions?el('div',{class:'row'},actions):null);
 }
 function card(title,sub,body,actions){
+  if(!actions&&title&&typeof SCHED_UPLOADS!=='undefined'&&SCHED_UPLOADS[title])actions=schedUploadButtons(SCHED_UPLOADS[title]);
   return el('section',{class:'card'},
     title?el('header',{},el('h3',{},title),sub?el('div',{class:'sub'},sub):null,
       el('div',{class:'spacer'}),actions||null):null,
@@ -1835,7 +1836,7 @@ function vProject(){
 
   w.append(card('Project particulars','Printed on every sheet of the bill',
     el('div',{class:'pad grid g3'},
-      fld('Project name',M.name,v=>M.name=v,{ph:'e.g. Al Nakheel Villa — Riyadh'}),
+      fld('Project name',M.name,v=>M.name=v,{ph:'e.g. ABC'}),
       fld('Project / job number',M.code,v=>M.code=v,{ph:'BE-2026-014'}),
       fld('Employer / client',M.client,v=>M.client=v),
       fld('Consultant',M.consultant,v=>M.consultant=v),
@@ -2612,7 +2613,7 @@ const TARGETS={
       {k:'total',t:'Total rate',n:1,a:['rate','total','all in','all-in','unit rate','price']},
       {k:'region',t:'Region / source',a:['region','source','location','市场','market']}]}
 };
-let IMP={file:null,sheets:[],si:0,hdr:0,target:'footings',map:{},mm:false,mode:'replace'};
+let IMP={file:null,sheets:[],si:0,hdr:0,target:'footings',map:{},mm:false,mode:'replace',preset:null};
 
 function vImport(){
   const w=el('div',{class:'stack'});
@@ -2622,12 +2623,22 @@ function vImport(){
   inp.addEventListener('change',async e=>{
     const file=e.target.files[0];if(!file)return;
     try{
-      IMP.sheets=await readWorkbook(file);IMP.file=file.name;IMP.si=0;IMP.hdr=0;
+      IMP.sheets=await readWorkbook(file);IMP.file=file.name;IMP.si=0;IMP.hdr=0;IMP.preset=null;IMP.mode='replace';
       autoMap();openImportWizard();
     }catch(err){toast(err.message||'Could not read that file');}
     inp.value='';
   });
-  w.append(card('Upload a schedule','.xlsx, .xlsm, .csv or tab separated',
+  w.append(card('Upload any schedule','The type is detected from the column headings and file name — you confirm it before importing',
+    el('div',{class:'pad'},
+      el('div',{class:'row'},
+        el('button',{class:'btn pri',onclick:uploadAnySchedule},'Upload a schedule (Excel / CSV)'),
+        el('span',{class:'hint'},'Footings, necks, columns, beams, slabs, walls, rooms, doors, windows, steel or a rate list.')),
+      el('div',{class:'row',style:'margin-top:14px;gap:6px'},
+        el('span',{class:'hint',style:'margin-right:4px'},'Blank templates:'),
+        [['footings','Footings'],['necks','Necks'],['columns','Columns'],['beams','Beams'],['slabs','Slabs'],
+         ['walls','Walls'],['rooms','Rooms'],['openings','Doors & windows'],['steel','Steel'],['rateBook','Rates']]
+          .map(([k,l])=>el('button',{class:'btn sm',onclick:()=>k==='rateBook'?downloadRateTemplate():downloadScheduleTemplate(k)},l))))));
+  w.append(card('Upload into a chosen schedule','.xlsx, .xlsm, .csv or tab separated',
     el('div',{class:'pad'},
       el('div',{class:'row'},
         el('button',{class:'btn pri',onclick:()=>inp.click()},'Choose a file'),
@@ -2686,7 +2697,7 @@ function mappedRows(limit){
   const T=TARGETS[IMP.target],rows=(IMP.sheets[IMP.si]||{rows:[]}).rows,out=[];
   for(let i=IMP.hdr+1;i<rows.length;i++){
     const r=rows[i];if(!r||!r.some(c=>String(c).trim()!==''))continue;
-    const o=Object.assign({},T.def);
+    const o=Object.assign({},T.def,(IMP.preset&&IMP.preset.def)||{});
     let any=false;
     T.fields.forEach(fd=>{
       const ci=IMP.map[fd.k];if(ci===undefined||ci<0)return;
@@ -2707,6 +2718,11 @@ function mappedRows(limit){
 function coerce(target,o){
   const L=s=>String(s||'').toLowerCase();
   if(target==='openings'){
+    if(!(IMP.map&&IMP.map.type>=0)){
+      const m=L(o.mark).replace(/[^a-z]/g,''),pre=IMP.preset&&IMP.preset.def&&IMP.preset.def.type;
+      if(!pre&&/^(w|win|window|sw|fw)/.test(m))o.type='W';
+      else if(pre!=='W'&&(/^(de|ed|ext|mde)/.test(m)||/external|entrance/.test(L(o.spec)+' '+L(o.room))))o.type='DE';
+    }
     const t=L(o.type);
     o.type=/w|glaz|window/.test(t)&&!/door/.test(t)?'W':(/ext|external|de\b/.test(t)?'DE':'D');
     o.fire=/y|yes|fr|fire|30|60|90|120/.test(L(o.fire))?'y':'n';
@@ -2715,6 +2731,7 @@ function coerce(target,o){
     const t=L(o.type);
     o.type=/dry|stud|gyp|partition/.test(t)?'drywall':/glaz/.test(t)?'glazed':
            /brick|facing/.test(t)?'brick':/ext/.test(t)?'ext-block':o.type||'int-block';
+    if(!WALLTYPE.some(x=>x.v===o.type))o.type=/y|yes|ext|external|outer/.test(L(o.ext))?'ext-block':'int-block';
     o.ext=/y|yes|ext|external|outer/.test(L(o.ext))?'y':(o.ext?'n':(o.type==='ext-block'||o.type==='brick'?'y':'n'));
     ['finA','finB'].forEach(k=>{const v=L(o[k]);
       if(!v)return;
@@ -2743,6 +2760,114 @@ function coerce(target,o){
   }
   return o;
 }
+/* ---------- schedule upload buttons, templates and type detection ---------- */
+const SCHED_UPLOADS={
+  'Footing schedule':[{target:'footings',label:'Footings'}],
+  'Necks and starter columns':[{target:'necks',label:'Necks'}],
+  'Ground beam schedule':[{target:'beams',label:'Ground beams',def:{kind:'ground'},match:r=>r.kind==='ground'}],
+  'Ground bearing slab':[{target:'slabs',label:'Ground slabs',def:{type:'ground'},match:r=>r.type==='ground'}],
+  'Column schedule':[{target:'columns',label:'Columns'}],
+  'Beam schedule':[{target:'beams',label:'Suspended beams',def:{kind:'sus'},match:r=>r.kind!=='ground'}],
+  'Suspended slab schedule':[{target:'slabs',label:'Suspended slabs',match:r=>r.type!=='ground'}],
+  'External wall schedule':[{target:'walls',label:'External walls',def:{ext:'y',type:'ext-block',finA:'render+paint',insul:'y'},match:r=>r.ext==='y'}],
+  'Internal wall and partition schedule':[{target:'walls',label:'Internal walls',def:{ext:'n'},match:r=>r.ext!=='y'}],
+  'Room schedule':[{target:'rooms',label:'Rooms'}],
+  'Door and window schedule':[
+    {target:'openings',label:'Doors',def:{type:'D'},match:r=>r.type==='D'||r.type==='DE',
+     note:'Rows are imported as internal doors unless the Type column says external (DE) or window (W).'},
+    {target:'openings',label:'Windows',def:{type:'W'},match:r=>r.type==='W',
+     note:'Rows are imported as windows unless the Type column says otherwise.'}],
+  'Structural steel schedule':[{target:'steel',label:'Steel members'}]
+};
+function schedUploadButtons(list){
+  const out=[];
+  list.forEach(u=>out.push(el('button',{class:'btn sm pri',title:'Read this schedule from an Excel or CSV file',
+    onclick:()=>uploadSchedule(u.target,u)},'Upload '+(list.length>1?u.label.toLowerCase():'from Excel'))));
+  out.push(el('button',{class:'btn sm',title:'Blank Excel file with the right column headings',
+    onclick:()=>downloadScheduleTemplate(list[0].target,list.length>1?null:list[0])},'Template'));
+  return el('div',{class:'row',style:'gap:6px'},out);
+}
+function pickSheetFile(cb){
+  const inp=el('input',{type:'file',accept:'.xlsx,.xlsm,.csv,.tsv,.txt',style:'display:none'});
+  inp.addEventListener('change',async e=>{const file=e.target.files[0];inp.remove();if(!file)return;
+    try{await cb(file);}catch(err){toast(err.message||'Could not read that file');}});
+  document.body.append(inp);inp.click();
+}
+function mapScore(target){
+  IMP.target=target;autoMap();
+  const F=TARGETS[target].fields;
+  return F.filter(fd=>IMP.map[fd.k]>=0).length/F.length+F.filter(fd=>IMP.map[fd.k]>=0).length*0.05;
+}
+/* choose the worksheet whose headers fit this schedule best */
+function bestSheetFor(target){
+  let best=0,bs=-1;
+  IMP.sheets.forEach((sh,i)=>{IMP.si=i;const sc=mapScore(target);if(sc>bs){bs=sc;best=i;}});
+  IMP.si=best;IMP.target=target;autoMap();
+  return bs;
+}
+function uploadSchedule(target,u){
+  pickSheetFile(async file=>{
+    IMP.sheets=await readWorkbook(file);IMP.file=file.name;IMP.mm=false;
+    IMP.preset=u&&(u.def||u.match)?u:null;
+    bestSheetFor(target);
+    IMP.mode='replace';
+    openImportWizard();
+  });
+}
+const DETECT_HINTS={footings:/foot|found|pad|base|fdn/,necks:/neck|starter|stub/,columns:/col/,beams:/beam|lintel|gb/,
+  slabs:/slab/,walls:/wall|partition|block/,rooms:/room|finish|space/,openings:/door|window|opening|glaz/,
+  steel:/steel|member|section/,rateBook:/rate|price|boq|cost/};
+function uploadAnySchedule(){
+  pickSheetFile(async file=>{
+    IMP.sheets=await readWorkbook(file);IMP.file=file.name;IMP.mm=false;IMP.preset=null;
+    const fn=file.name.toLowerCase();
+    let best='footings',bs=-1,bestSi=0;
+    Object.keys(TARGETS).forEach(t=>{
+      IMP.sheets.forEach((sh,i)=>{IMP.si=i;
+        let sc=mapScore(t);
+        const hint=DETECT_HINTS[t];
+        if(hint&&hint.test(fn))sc+=0.6;
+        if(hint&&hint.test(String(sh.name).toLowerCase()))sc+=0.4;
+        if(sc>bs){bs=sc;best=t;bestSi=i;}});
+    });
+    IMP.target=best;IMP.si=bestSi;autoMap();
+    if(best==='openings'&&/window/.test(fn)&&!/door/.test(fn))IMP.preset=SCHED_UPLOADS['Door and window schedule'][1];
+    else if(best==='openings'&&/door/.test(fn)&&!/window/.test(fn))IMP.preset=SCHED_UPLOADS['Door and window schedule'][0];
+    IMP.mode='replace';
+    openImportWizard();
+    toast('Read as '+TARGETS[best].label.toLowerCase()+' — change “Import into” if that is wrong.',5000);
+  });
+}
+function downloadScheduleTemplate(target,u){
+  const T=TARGETS[target];
+  const H=T.fields.map(fd=>fd.t+(fd.len?' (m)':''));
+  const rows=[H.map(h=>TX(h,ST.hdr))];
+  for(let i=0;i<20;i++)rows.push(T.fields.map(fd=>(fd.n||fd.len)?NM('',ST.rateIn):TX('')));
+  const sheet=worksheetXml({rows,cols:T.fields.map(fd=>Math.max(11,fd.t.length+5)),freeze:1,first:true,
+    footL:'BidEst '+T.label.toLowerCase()+' template',footR:'Schedule'});
+  const tips={
+    footings:'Type is pad, strip or raft. Bottom level is optional — the project founding level is used when blank.',
+    necks:'Give b and d for a rectangular neck, or Diameter for a round one. Height is optional — derived from levels.',
+    columns:'Give b and d, or Diameter for circular columns. Level must match a level key or name (e.g. GF, First Floor).',
+    beams:'Depth is the overall depth. Write "ground" in Ground beam? for ground / tie beams.',
+    slabs:'Construction: solid, hollowcore, deck or ground. Area in m².',
+    walls:'Construction: block, external block, brick, drywall or glazed. Height is optional — derived from levels.',
+    rooms:'Floor finish: tile, vinyl, carpet, epoxy, screed. Wall finish: plaster+paint, tile, tile+paint, paint. Ceiling: gyp, susp, paint.',
+    openings:'D / DE / W: D = internal door, DE = external door, W = window. If you leave it blank, marks starting W are read as windows.',
+    steel:'Section names like UB 305x165x40 or IPE 300 fill the kg/m automatically.',
+    rateBook:'One row per rate, coded to CSI.'};
+  const notes=worksheetXml({cols:[110],footL:'BidEst template',footR:'Notes',rows:[
+    [TX('How to fill in the '+T.label.toLowerCase(),ST.bold)],
+    [TX('• Keep the headings in row 1 — the app matches columns by name. Extra columns are ignored.')],
+    [TX('• Lengths are in metres. If your schedule is in millimetres, choose “millimetres” in the import window.')],
+    [TX('• Number is how many identical items the row represents.')],
+    [TX('• '+tips[target])],
+    [TX('• You can also upload your own schedule in its existing layout and map the columns in the import window.')]]});
+  const bytes=packXlsx([[T.label.replace(/[^\w ]+/g,' ').slice(0,30),sheet],['Notes',notes]]);
+  const nm=((u&&u.label)||T.label).replace(/[^\w]+/g,'_');
+  deliver('BidEst_'+nm+'_template.xlsx',new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+}
+
 function openImportWizard(){
   const body=el('div',{});
   const draw=()=>{
@@ -2759,10 +2884,13 @@ function openImportWizard(){
         selField('Header row',IMP.hdr,rows.slice(0,15).map((r,i)=>({v:i,t:'Row '+(i+1)+' — '+r.slice(0,4).join(' | ').slice(0,44)})),
           v=>{IMP.hdr=+v;draw();}),
         selField('Import into',IMP.target,Object.keys(TARGETS).map(k=>({v:k,t:TARGETS[k].label})),
-          v=>{IMP.target=v;autoMap();draw();}),
+          v=>{IMP.target=v;IMP.preset=null;autoMap();draw();}),
         selField('Lengths are in',IMP.mm?'mm':'m',[{v:'m',t:'metres'},{v:'mm',t:'millimetres'}],
           v=>{IMP.mm=(v==='mm');draw();}),
-        selField('Existing rows',IMP.mode,[{v:'replace',t:'Replace'},{v:'append',t:'Append'}],v=>{IMP.mode=v;})));
+        selField('Existing rows',IMP.mode,[{v:'replace',t:IMP.preset?'Replace existing '+IMP.preset.label.toLowerCase():'Replace'},{v:'append',t:'Add to existing'}],v=>{IMP.mode=v;})));
+    if(IMP.preset)body.append(el('div',{class:'flag ac',style:'margin-bottom:12px'},el('div',{},
+      el('b',{},'Importing as '+IMP.preset.label.toLowerCase()+'. '),
+      IMP.preset.note||'Rows without their own value for this are set accordingly.')));
     const mapT=el('table',{class:'mini'},
       el('thead',{},el('tr',{},el('th',{},'Model field'),el('th',{},'Spreadsheet column'),el('th',{},'First value'))),
       el('tbody',{},T.fields.map(fd=>{
@@ -2795,10 +2923,10 @@ function openImportWizard(){
       const T=TARGETS[IMP.target],rows=mappedRows();
       if(!rows.length){toast('Nothing to import — check the column mapping.');return;}
       if(IMP.mode==='replace'){
-        if(IMP.target==='beams')P.beams=rows;
-        else if(IMP.target==='slabs')P.slabs=rows;
-        else P[T.arr]=rows;
+        const keep=IMP.preset&&IMP.preset.match?P[T.arr].filter(r=>!IMP.preset.match(r)):[];
+        P[T.arr]=keep.concat(rows);
       }else P[T.arr]=P[T.arr].concat(rows);
+      IMP.preset=null;
       closeModal();
       view=({footings:'sub',necks:'sub',columns:'frame',beams:'frame',slabs:'frame',steel:'frame',
         walls:'int',rooms:'int',openings:'int',rateBook:'price'})[IMP.target]||view;
@@ -3245,10 +3373,15 @@ function vPrice(){
   const book=P.rateBook||[];
   w.append(head('Stage 09','Price library',
     'A rate library coded to CSI MasterFormat. Rates match a bill item on its exact CSI code first, then on the longest matching prefix, so a division-level rate still catches work that has no line of its own.',
-    [el('button',{class:'btn',onclick:()=>{IMP.target='rateBook';view='imp';render();}},'Import a price book'),
-     el('button',{class:'btn',onclick:seedRates},'Insert a starter structure')]));
+    [el('button',{class:'btn pri',onclick:uploadRateList},'Upload rate list (Excel)'),
+     el('button',{class:'btn',onclick:downloadRateTemplate},'Download blank template'),
+     el('button',{class:'btn gho',onclick:seedRates},'Insert empty CSI lines')]));
+  if(!book.length)w.append(el('div',{class:'flag ac'},el('div',{},
+    el('b',{},'No rates loaded. '),
+    'This app ships without rates. Upload your own rate list as .xlsx or .csv — one row per rate with a CSI code, description, unit and either a total rate or labour / material / plant / subcontract. ',
+    'Not sure of the layout? Download the blank template, fill in your rates and upload it.')));
 
-  w.append(card('Shared library','One library for every project — held online with the app, not inside this project file',
+  w.append(card('Shared library','One library for every project — kept in this browser, not inside this project file',
     el('div',{class:'pad'},
       el('div',{class:'row'},
         el('button',{class:'btn pri',onclick:pullFromShared},'Bring the shared library into this project'),
@@ -3323,6 +3456,70 @@ function renderPriceRows(tbody){
   });
   if(rows.length>400)tbody.append(el('tr',{},el('td',{colspan:9,class:'hint',style:'padding:10px'},
     'Showing the first 400 of '+rows.length+' rates — narrow the search to see the rest.')));
+}
+/* ---------- rate list from Excel ---------- */
+function uploadRateList(){
+  const inp=el('input',{type:'file',accept:'.xlsx,.xlsm,.csv,.tsv,.txt',style:'display:none'});
+  inp.addEventListener('change',async e=>{
+    const file=e.target.files[0];inp.remove();if(!file)return;
+    try{
+      IMP.sheets=await readWorkbook(file);IMP.file=file.name;IMP.si=0;
+      IMP.target='rateBook';IMP.mm=false;IMP.mode=(P.rateBook||[]).length?'append':'replace';
+      /* pick the first worksheet that has a recognisable rate header */
+      for(let i=0;i<IMP.sheets.length;i++){IMP.si=i;autoMap();
+        if(IMP.map.code>=0&&(IMP.map.total>=0||IMP.map.material>=0||IMP.map.labour>=0))break;}
+      if(!(IMP.map.code>=0))IMP.si=0,autoMap();
+      openImportWizard();
+      if(!(IMP.map.code>=0))toast('Map the CSI code and rate columns, then press Import.',5000);
+    }catch(err){toast(err.message||'Could not read that file');}
+  });
+  document.body.append(inp);inp.click();
+}
+function downloadRateTemplate(){
+  /* every CSI code the measurement engine can bill, one line each */
+  const seen={},codes=[];
+  WT_KEYS.forEach(k=>{const w=WT[k];
+    if(!w.c||w.g===G.COM)return;
+    const n=normCode(w.c);if(seen[n])return;seen[n]=1;
+    codes.push([w.c,String(w.desc).split(';')[0].trim(),w.u]);});
+  codes.sort((x,y)=>x[0]<y[0]?-1:x[0]>y[0]?1:0);
+  const H=['CSI code','Description','Unit','Labour','Material','Plant','Subcontract','Total rate','Region / source'];
+  const rows=[H.map(h=>TX(h,ST.hdr))];
+  codes.forEach(([c,d,u])=>rows.push([TX(c,ST.code),TX(d),TX(u,ST.unit),
+    NM('',ST.rateIn),NM('',ST.rateIn),NM('',ST.rateIn),NM('',ST.rateIn),NM('',ST.rateIn),TX('')]));
+  const sheet=worksheetXml({rows,cols:[14,40,8,12,12,12,13,13,20],freeze:1,first:true,
+    filter:'A1:I'+rows.length,footL:'BidEst rate list template',footR:'Rates'});
+  const notes=worksheetXml({cols:[100],rows:[
+    [TX('How to fill in the BidEst rate list',ST.bold)],
+    [TX('• One row per rate. Keep the header names in row 1 — the app matches columns by name.')],
+    [TX('• CSI code is required. Bill items are priced on an exact code match first, then the longest matching code prefix (e.g. 03 30 00 prices every 03 30 xx item).')],
+    [TX('• Enter either a Total rate, or the Labour / Material / Plant / Subcontract components — the total is used when both are given.')],
+    [TX('• Rates exclude waste: waste % is added in the app from the project conventions.')],
+    [TX('• Add as many rows as you need, and delete the ones you do not use.')]],footL:'BidEst rate list template',footR:'Notes'});
+  const bytes=packXlsx([['Rates',sheet],['Notes',notes]]);
+  deliver('BidEst_rate_list_template.xlsx',new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+}
+function packXlsx(sheets){
+  const names=sheets.map(x=>x[0]);
+  const X='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  const wb=X+'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'+
+    '<sheets>'+names.map((n,i)=>'<sheet name="'+xesc(n)+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join('')+'</sheets>'+
+    (sheets[0][1].indexOf('<autoFilter')>=0?'<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'+
+      xesc(names[0])+'!$A$1:$I$1</definedName></definedNames>':'')+'</workbook>';
+  const wbRels=X+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    names.map((n,i)=>'<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join('')+
+    '<Relationship Id="rId'+(names.length+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
+  const ct=X+'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'+
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'+
+    '<Default Extension="xml" ContentType="application/xml"/>'+
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+
+    names.map((n,i)=>'<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join('')+'</Types>';
+  const rels=X+'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+  return zipStore([['[Content_Types].xml',ct],['_rels/.rels',rels],['xl/workbook.xml',wb],
+    ['xl/_rels/workbook.xml.rels',wbRels],['xl/styles.xml',STYLES_XML]]
+    .concat(sheets.map((x,i)=>['xl/worksheets/sheet'+(i+1)+'.xml',x[1]])));
 }
 function allIn(r){return nn(r.total)!==null?num(r.total):num(r.labour)+num(r.material)+num(r.plant)+num(r.sub);}
 function seedRates(){
@@ -4504,8 +4701,8 @@ function newProject(){
 function loadDemo(){
   P=blankProject();
   if(typeof tkResetSession==='function')tkResetSession();
-  P.meta=Object.assign(P.meta,{name:'Al Nakheel Villa — Riyadh',code:'BE-2026-014',
-    client:'Private employer',consultant:'Dar Studio Architects',location:'Riyadh, Saudi Arabia',
+  P.meta=Object.assign(P.meta,{name:'ABC',code:'BE-2026-014',
+    client:'AZ',consultant:'XYZ',location:'Riyadh, Saudi Arabia',
     currency:'SAR',status:'For Tender',standard:'NRM2',preparedBy:'BidEst',
     drawings:'AR-100 to AR-140, ST-200 to ST-215, Rev C'});
   P.levels={NGL:0.000,FGL:0.150,BOF:-1.800,GWT:null,siteArea:600,floors:[
@@ -4584,17 +4781,9 @@ function loadDemo(){
     {text:'Reinforcement taken at typical densities — no bar bending schedules issued with the tender set.'},
     {text:'Wall girths measured to the internal face of structure; no allowance for wall thickness at junctions.'}];
   P.commercial={prelimPct:9,prelimLump:0,ohPct:12,contingPct:5,inflationPct:2.5,dayworksLump:0};
-  seedRates();
-  const demoRates={'312316':185,'31232323':42,'31232313':58,'31232333':95,'033053':420,'033000':1150,
-    '031113':175,'032100':4200,'032200':38,'042200':165,'042100':240,'051200':9800,'071300':145,
-    '072100':78,'072600':22,'075200':132,'074213':680,'081416':1450,'085113':2100,'087100':420,
-    '084413':1850,'092400':68,'093013':185,'093016':215,'095113':148,'092900':125,'099123':38,
-    '092216':215,'035400':72,'224000':1650,'220000':390,'230000':720,'260000':540,'210000':120,
-    '123200':1250,'321413':165,'334100':240};
-  P.rateBook.forEach(r=>{const k=normCode(r.code);if(demoRates[k]!==undefined)r.total=demoRates[k];});
   SAVED={id:null,name:P.meta.name,dirty:true};
   view='takeoff';render();
-  toast('Worked example loaded — 3 levels, 24 columns, 7 room types, priced');
+  toast('Worked example loaded — upload your rate list in the Price library to price it',5000);
 }
 
 /* ==========================================================================

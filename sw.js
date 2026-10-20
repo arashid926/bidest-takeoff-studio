@@ -1,6 +1,6 @@
 /* BidEst Take-Off Studio — offline cache.
    Bump VERSION whenever you change index.html or js/ so users get the update. */
-const VERSION = 'bidest-takeoff-v1.0.0';
+const VERSION = 'bidest-takeoff-v1.2.0';
 const APP_SHELL = [
   './',
   'index.html',
